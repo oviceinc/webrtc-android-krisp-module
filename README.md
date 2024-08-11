@@ -27,8 +27,17 @@ deps = [ “../../webrtc-android-krisp-module:krisp_processor”, ….]
 Add krisp_java library into the dependency list of the dist_jar(“libwebrtc”), for creating public java modules
 deps = [ “../../webrtc-android-krisp-module:krisp_java”, ….]
 ```
+See the screenshot.
 
-## Step 4: Build libwebrtc.aar
+
+<img width="662" alt="BUILD gn-mod" src="https://github.com/user-attachments/assets/adb3d064-923a-4dcb-8c35-bb04a5501015">
+
+## Step 4: Build the WebRTC Android library
 ```
 python3  tools_webrtc/android/build_aar.py
+```
+
+## Step 5: Get the WebRTC Android library
+```
+ls libwebrtc.aar
 ```
