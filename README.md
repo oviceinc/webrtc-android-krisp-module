@@ -1,38 +1,34 @@
-# krisp-android-wrapper
+# WebRTC Android Krisp Module
 
-Step 1: Install Google depot_tools.
+## Step 1: Checkout WebRTC Repository
 ```
+mkdir workdir
+cd workdir
 git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-```
-
-Step 2: Add the depot_tools installation root folder to the PATH variable.
-```
 export PATH=`pwd`/depot_tools:$PATH
-```
-
-Step 3: Get webrtc sources
-```
 fetch --nohooks webrtc_android
+cd src
+git checkout branch-heads/6478
+git checkout -b 6478-modified a18e38fed2307edd6382760213fa3ddf199fa181
+cd ..
 gclient sync
 cd src
 ```
 
-Step 4: Modify sdk/andorid/BUILD.gn file
+## Step 2: Checkout the WebRTC Android Krisp Module Into The Repo
 ```
-Add krisp_processor library into the dependency list of rtc_shared_library(“libjingle_peerconnection_so”)
-deps = [ “../../krisp-android-wrapper:krisp_processor”, ….]
-
-Add krisp_java library into the dependency list of dist_jar(“libwebrtc”), for creating public java modules
-deps = [ “../../krisp-android-wrapper:krisp_java”, ….]
-
+git clone git@github.com:krispai/webrtc-android-krisp-module.git
 ```
 
-Step 5: Clone  krisp-android-wrapper directory
+## Step 3: Modify the sdk/andorid/BUILD.gn file
 ```
-git@github.com:krispai/krisp-android-wrapper.git
+Add krisp_processor library into the dependency list of the rtc_shared_library(“libjingle_peerconnection_so”)
+deps = [ “../../webrtc-android-krisp-module:krisp_processor”, ….]
+Add krisp_java library into the dependency list of the dist_jar(“libwebrtc”), for creating public java modules
+deps = [ “../../webrtc-android-krisp-module:krisp_java”, ….]
 ```
 
-Step 6: Build libwebrtc.aar
+## Step 4: Build libwebrtc.aar
 ```
 python3  tools_webrtc/android/build_aar.py
 ```
