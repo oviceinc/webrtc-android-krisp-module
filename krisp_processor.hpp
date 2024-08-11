@@ -2,9 +2,12 @@
 #include "modules/audio_processing/audio_processing_impl.h"
 #include "modules/audio_processing/audio_buffer.h"
 
-namespace Krisp {
 
-class KrispProcessor : public webrtc::CustomProcessing {
+namespace Krisp
+{
+
+class KrispProcessor : public webrtc::CustomProcessing
+{
 public:
 
     KrispProcessor(const KrispProcessor&) = delete;
@@ -14,20 +17,19 @@ public:
     ~KrispProcessor();
 
     static KrispProcessor* GetInstance();
-    static bool Init(const char* modelPath, const char* krispDllPath);
-    static bool Init(const void* modelAddr, unsigned int modelSize, const char* krispDllPath);
-    static void DeInit();
-    static void Enable(bool isEnable);
-    static bool IsEnabled();
+
+    bool Init(const char* modelPath, const char* krispDllPath);
+    bool Init(const void* modelAddr, unsigned int modelSize, const char* krispDllPath);
+    void DeInit();
+    void Enable(bool isEnable);
+    bool IsEnabled() const;
 
 private:
     KrispProcessor();
-    void UnloadDLL();
 
-    static void* sdkHandle;
-    static bool m_isEnabled;
-    static KrispProcessor* m_instance;
+    static KrispProcessor* _singleton;
 
+    bool m_isEnabled;
     void* m_session;
     int m_sampleRate;
     int m_numberOfChannels;

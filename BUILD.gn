@@ -11,7 +11,7 @@ rtc_library("krisp_processor") {
    sources = [
       "krisp_processor.cc",
       "krisp_processor_jni.cc",
-      "krisp_audio_sdk_api_wrapper.cc", ]
+      "krisp_sdk.cc", ]
    lib_dirs = []
    deps = [":generated_krisp_jni",
            ":krisp_java",
