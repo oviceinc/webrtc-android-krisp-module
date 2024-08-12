@@ -1,6 +1,68 @@
 # WebRTC Android Krisp Module
 
-## Step 1: Checkout WebRTC Repository
+## Usage Instructions
+
+### 1. Include the library, import and instantiate the Krisp Module
+
+1.1. include the `libwebrtc.aar` into the Android project.
+
+1.2. `import org.webrtc.KrispAudioProcessingImpl`
+
+1.3. ` var audioProcessorModule = KrispAudioProcessingImpl()`
+
+### 2 Load dependencies
+2.1. Load the stdlib required by Krisp Audio SDK. Load it before using Krisp.
+
+
+`System.loadLibrary("c++_shared")`
+
+2.2. Load the jingle_peerconnection_so. The library is required to use WebRTC on Android. 
+
+`System.loadLibrary("jingle_peerconnection_so")`
+
+
+### 3. Load the Krisp Dynamic Library with the model
+#### 3.1. Using the model file path
+You can load Krisp model specifying file path. For this scenario you should make sure the Android app has access to the file resource.
+
+```
+val modelFilePath = “c6.f.s.ced125.kw”
+val krispDllpath = "libkrisp-audio-sdk.so" 
+var retValue = audioProcessorModule.Init(modelFilePath, krispDllpath)
+if (!retValue) {
+    // report error, read the logs for the details
+}
+```
+Make sure to specify correct file paths, these are hard coded sample values.
+
+#### 3.2. Using the model data loaded to the memory
+Alternatively, you can load Krisp model by specifying model data content loaded into the memory.
+```
+var modelData: ByteArray // = load the model into the memory
+audioProcessorModule.InitWithData(modelData, krispDllpath)
+if (!retValue) {
+    return null
+}
+```
+
+### 4. Enable, disable Krisp NC during runtime
+to enable Krisp NC during runtime
+`audioProcessorModule.Enable(true)`
+
+to disable Krisp NC
+`audioProcessorModule.Enable(false)`
+
+### 5. Integrate Krisp Module into the WebRTC PeerConnectionFactory
+```
+PeerConnectionFactory
+            .builder()
+            .setAudioProcessingFactory(audioProcessorModule)
+```
+
+
+## Build Instructions
+
+### 1. Checkout WebRTC Repository
 ```
 mkdir workdir
 cd workdir
@@ -15,12 +77,12 @@ gclient sync
 cd src
 ```
 
-## Step 2: Checkout the WebRTC Android Krisp Module Into The Repo
+### 2. Checkout the WebRTC Android Krisp Module Into The Repo
 ```
 git clone git@github.com:krispai/webrtc-android-krisp-module.git
 ```
 
-## Step 3: Modify the sdk/andorid/BUILD.gn file
+### 3. Modify the sdk/andorid/BUILD.gn file
 ```
 Add krisp_processor library into the dependency list of the rtc_shared_library(“libjingle_peerconnection_so”)
 deps = [ “../../webrtc-android-krisp-module:krisp_processor”, ….]
@@ -32,12 +94,12 @@ See the screenshot.
 
 <img width="662" alt="BUILD gn-mod" src="https://github.com/user-attachments/assets/adb3d064-923a-4dcb-8c35-bb04a5501015">
 
-## Step 4: Build the WebRTC Android library
+### 4. Build the WebRTC Android library
 ```
 python3  tools_webrtc/android/build_aar.py
 ```
 
-## Step 5: Get the WebRTC Android library
+### 5. Get the WebRTC Android library
 ```
 ls libwebrtc.aar
 ```
