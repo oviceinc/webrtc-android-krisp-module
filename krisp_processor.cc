@@ -154,7 +154,7 @@ void KrispProcessor::Process(webrtc::AudioBuffer* audioBuffer)
       m_lastTimeStamp = now;
     }
 
-    int audioBufferSampleRate = audioBuffer->num_frames() * 1000;
+    int audioBufferSampleRate = audioBuffer->num_frames() * 100;
 	if(audioBufferSampleRate != m_sampleRate)
     {
         if (m_session)
