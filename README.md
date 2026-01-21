@@ -8,7 +8,7 @@
 
 1.2. `import org.webrtc.KrispAudioProcessingImpl`
 
-1.3. ` var audioProcessorModule = KrispAudioProcessingImpl()`
+1.3. `var audioProcessorModule = KrispAudioProcessingImpl()`
 
 ### 2 Load dependencies
 2.1. Load the stdlib required by Krisp Audio SDK. Load it before using Krisp.
@@ -27,7 +27,7 @@ You can load Krisp model specifying file path. For this scenario you should make
 
 ```
 val modelFilePath = “c6.f.s.ced125.kw”
-val krispDllpath = "libkrisp-audio-sdk.so" 
+val krispDllpath = "libkrisp-audio-sdk.so"
 var retValue = audioProcessorModule.Init(modelFilePath, krispDllpath)
 if (!retValue) {
     // report error, read the logs for the details

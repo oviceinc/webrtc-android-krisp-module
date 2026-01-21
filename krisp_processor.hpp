@@ -1,7 +1,12 @@
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <vector>
+
 #include "modules/audio_processing/include/audio_processing.h"
-#include "modules/audio_processing/audio_processing_impl.h"
 #include "modules/audio_processing/audio_buffer.h"
 
+#include "krisp-audio-sdk-nc-c.h"
 
 namespace Krisp
 {
@@ -14,7 +19,7 @@ public:
     KrispProcessor(KrispProcessor&&) = delete;
     KrispProcessor& operator=(const KrispProcessor&) = delete;
     KrispProcessor& operator=(KrispProcessor&&) = delete;
-    ~KrispProcessor();
+    virtual ~KrispProcessor();
 
     static KrispProcessor* GetInstance();
 
@@ -28,16 +33,19 @@ private:
     KrispProcessor();
 
     static KrispProcessor* _singleton;
+    static std::once_flag _initFlag;
 
-    bool m_isEnabled;
-    void* m_session;
-    int m_sampleRate;
+    std::atomic<bool> m_isEnabled;
     int m_numberOfChannels;
     long m_lastTimeStamp;
+    std::wstring m_modelPath;
+    std::vector<uint8_t> m_modelData;
     std::vector<float> m_bufferIn;
     std::vector<float> m_bufferOut;
+    KrispModelInfo m_modelInfo;
+    KrispNcSessionConfig m_sessionConfig;
+    krispNcHandle m_ncCachedHandle;
 
-    static void * CreateAudioSession(int sampleRate);
 
     void Initialize(int sampleRate, int numOfChannels) override ;
     void Process(webrtc::AudioBuffer* audioBuffer) override;

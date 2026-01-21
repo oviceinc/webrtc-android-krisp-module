@@ -8,6 +8,7 @@ rtc_library("krisp_processor") {
    configs += [ "../modules/audio_processing:apm_debug_dump", ]
    configs += [ "//build/config/android:hide_all_but_jni" ]
    defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
+   include_dirs = [ "krisp_c_api_include" ] 
    sources = [
       "krisp_processor.cc",
       "krisp_processor_jni.cc",
