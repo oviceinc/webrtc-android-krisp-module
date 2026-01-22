@@ -1,5 +1,5 @@
+#include <memory>
 #include <atomic>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -11,30 +11,35 @@
 namespace Krisp
 {
 
-class KrispProcessor : public webrtc::CustomProcessing
+// Load Krisp DLL before using Krisp API
+bool LoadKrisp(const char* krispDllPath);
+
+// Unload Krisp DLL only after disposing all KrispNoiseFilter instances
+bool UnloadKrisp();
+
+class KrispNoiseFilter
 {
 public:
+    KrispNoiseFilter();
+    KrispNoiseFilter(const KrispNoiseFilter&) = delete;
+    KrispNoiseFilter(KrispNoiseFilter&&) = delete;
+    KrispNoiseFilter& operator=(const KrispNoiseFilter&) = delete;
+    KrispNoiseFilter& operator=(KrispNoiseFilter&&) = delete;
+    virtual ~KrispNoiseFilter();
 
-    KrispProcessor(const KrispProcessor&) = delete;
-    KrispProcessor(KrispProcessor&&) = delete;
-    KrispProcessor& operator=(const KrispProcessor&) = delete;
-    KrispProcessor& operator=(KrispProcessor&&) = delete;
-    virtual ~KrispProcessor();
-
-    static KrispProcessor* GetInstance();
-
-    bool Init(const char* modelPath, const char* krispDllPath);
-    bool Init(const void* modelAddr, unsigned int modelSize, const char* krispDllPath);
+    bool Init(const char* modelPath);
+    bool Init(const void* modelAddr, unsigned int modelSize);
     void DeInit();
     void Enable(bool isEnable);
     bool IsEnabled() const;
 
+    // Call this when sample rate changes.
+    // Call this when audio stream changes.
+    // Call this after the end of the call, or before the next call.
+    void InitializeSession(int sampleRate, int numberOfChannels);
+    void ProcessFrame(webrtc::AudioBuffer* audioBuffer);
+
 private:
-    KrispProcessor();
-
-    static KrispProcessor* _singleton;
-    static std::once_flag _initFlag;
-
     std::atomic<bool> m_isEnabled;
     int m_numberOfChannels;
     long m_lastTimeStamp;
@@ -45,11 +50,34 @@ private:
     KrispModelInfo m_modelInfo;
     KrispNcSessionConfig m_sessionConfig;
     krispNcHandle m_ncCachedHandle;
+};
 
-
+class KrispAdapter : public webrtc::CustomProcessing
+{
+public:
+    explicit KrispAdapter(const std::shared_ptr<KrispNoiseFilter>& krispProcessor);
+    // Do not allow copy
+    KrispAdapter(const KrispAdapter&) = delete;
+    KrispAdapter& operator=(const KrispAdapter&) = delete;
+    // Allow move
+    KrispAdapter(KrispAdapter&&) = default;
+    KrispAdapter& operator=(KrispAdapter&&) = default;
+    virtual ~KrispAdapter() = default;
+private:
     void Initialize(int sampleRate, int numOfChannels) override ;
     void Process(webrtc::AudioBuffer* audioBuffer) override;
     std::string ToString() const override;
     void SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting setting) override;
+
+    std::shared_ptr<KrispNoiseFilter> m_krispProcessor;
 };
+
+struct NativeKrispModule {
+    std::shared_ptr<KrispNoiseFilter> proc;
+    rtc::scoped_refptr<webrtc::AudioProcessing> apm;
+
+    static std::unique_ptr<NativeKrispModule> Create();
+};
+
+
 }

@@ -25,12 +25,12 @@ rtc_library("krisp_processor") {
 rtc_android_library("krisp_java") {
   visibility = [ "*" ]
   sources = [
-    "java/src/org/webrtc/KrispAudioProcessingImpl.java",]
+    "java/src/org/webrtc/KrispAudioProcessingFactory.java",]
   deps = ["//sdk/android:peerconnection_java",]
 }
 
 generate_jni("generated_krisp_jni") {
-    sources = [ "java/src/org/webrtc/KrispAudioProcessingImpl.java",]
+    sources = [ "java/src/org/webrtc/KrispAudioProcessingFactory.java",]
     namespace = "Krisp"
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
 }

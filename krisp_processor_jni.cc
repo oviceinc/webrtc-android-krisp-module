@@ -4,80 +4,109 @@
 #include <cstring>
 #include <memory>
 
-#include "rtc_base/time_utils.h"
-#include "rtc_base/checks.h"
-#include "rtc_base/ref_counted_object.h"
-#include "rtc_base/thread.h"
 #include "sdk/android/src/jni/jni_helpers.h"
-#include "webrtc-android-krisp-module/generated_krisp_jni/KrispAudioProcessingImpl_jni.h"
 
 
 namespace Krisp
 {
 
-static webrtc::AudioProcessing* apmPtr;
+#if defined(__GNUC__)
+#define JNI_UNUSED __attribute__((unused))
+#else
+#define JNI_UNUSED
+#endif
 
-static jlong JNI_KrispAudioProcessingImpl_GetAudioProcessorModule(JNIEnv* env)
-{
-
-   std::unique_ptr<webrtc::CustomProcessing> krisp_processor(
-   			KrispProcessor::GetInstance());
-   auto apm = webrtc::AudioProcessingBuilder()
-    		.SetCapturePostProcessing(std::move(krisp_processor))
-   			.Create();
-   webrtc::AudioProcessing::Config config;
-   config.echo_canceller.enabled = false;
-   config.echo_canceller.mobile_mode = true;
-   apm->ApplyConfig(config);
-   apmPtr = apm.release();
-   return webrtc::jni::jlongFromPointer(apmPtr);
-
+static NativeKrispModule* GetModule(jlong native_module) {
+	return reinterpret_cast<NativeKrispModule*>(native_module);
 }
 
-static void JNI_KrispAudioProcessingImpl_Enable(JNIEnv* env, jboolean disable)
+static jlong JNI_UNUSED JNI_KrispAudioProcessingFactory_CreateModule(JNIEnv* env)
 {
-	KrispProcessor::GetInstance()->Enable(disable);
+	auto module = NativeKrispModule::Create();
+	return webrtc::jni::jlongFromPointer(module.release());
 }
 
-static jboolean JNI_KrispAudioProcessingImpl_IsEnabled(JNIEnv* env)
+static jlong JNI_UNUSED JNI_KrispAudioProcessingFactory_GetAudioProcessorModule(
+	JNIEnv* env,
+	jlong native_module)
 {
-	return KrispProcessor::GetInstance()->IsEnabled();
+	auto* module = GetModule(native_module);
+	if (!module || !module->apm) {
+		return 0;
+	}
+	return webrtc::jni::jlongFromPointer(module->apm.get());
 }
 
-static jboolean JNI_KrispAudioProcessingImpl_Init(JNIEnv* env,
-	const webrtc::JavaParamRef<jstring>& modelPathRef,
+static jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_LoadKrisp(
+	JNIEnv* env,
 	const webrtc::JavaParamRef<jstring>& krispDllPath)
 {
+	const char *dllPath = env->GetStringUTFChars(krispDllPath.obj(), nullptr);
+	bool retValue = LoadKrisp(dllPath);
+	env->ReleaseStringUTFChars(krispDllPath.obj(), dllPath);
+	return static_cast<jboolean>(retValue);
+}
+
+static jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_UnloadKrisp(JNIEnv* env)
+{
+	return static_cast<jboolean>(UnloadKrisp());
+}
+
+static void JNI_UNUSED JNI_KrispAudioProcessingFactory_Enable(
+	JNIEnv* env,
+	jlong native_module,
+	jboolean disable)
+{
+	auto* module = GetModule(native_module);
+	if (module && module->apm) {
+		module->apm->SetRuntimeSetting(
+			webrtc::AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(disable));
+	}
+}
+
+static jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_IsEnabled(
+	JNIEnv* env,
+	jlong native_module)
+{
+	auto* module = GetModule(native_module);
+	return module && module->proc ? module->proc->IsEnabled() : false;
+}
+
+static jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_Init(JNIEnv* env,
+	jlong native_module,
+	const webrtc::JavaParamRef<jstring>& modelPathRef)
+{
+	auto* module = GetModule(native_module);
 	jstring javaModelPath = modelPathRef.obj();
-	jstring javaDllPath = krispDllPath.obj();
 	const char *modelFilePath = env->GetStringUTFChars(javaModelPath, nullptr);
-	const char *dllPath = env->GetStringUTFChars(javaDllPath, nullptr);
-	bool retValue = KrispProcessor::GetInstance()->Init(modelFilePath, dllPath);
+	bool retValue = module && module->proc ? module->proc->Init(modelFilePath) : false;
 	env->ReleaseStringUTFChars(javaModelPath, modelFilePath);
 	return static_cast<jboolean>(retValue); 
 }
 
-static jboolean JNI_KrispAudioProcessingImpl_InitWithData(JNIEnv* env,
-	const webrtc::JavaParamRef<jbyteArray>& modelDataRef,
-	const webrtc::JavaParamRef<jstring>& krispDllPath)
+static jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_InitWithData(JNIEnv* env,
+	jlong native_module,
+	const webrtc::JavaParamRef<jbyteArray>& modelDataRef)
 {
+	auto* module = GetModule(native_module);
 	jbyteArray javaByteArray = modelDataRef.obj();
-	jstring javaDllPath = krispDllPath.obj();
 	jsize javaModelSize = env->GetArrayLength(javaByteArray);
 	jbyte *javaModelData = env->GetByteArrayElements(javaByteArray, nullptr);
-	const char *dllPath = env->GetStringUTFChars(javaDllPath, nullptr);
 	size_t arraySize = static_cast<unsigned int>(javaModelSize);
 	std::unique_ptr<char[]> modelData(new char[arraySize]);
 	std::memcpy(modelData.get(), javaModelData, arraySize);
-	bool retValue = KrispProcessor::GetInstance()->Init(modelData.get(), arraySize, dllPath);
+	bool retValue = module && module->proc ? module->proc->Init(modelData.get(), arraySize) : false;
 	env->ReleaseByteArrayElements(javaByteArray, javaModelData, JNI_ABORT);
 	return static_cast<jboolean>(retValue); 
 }
 
-static void JNI_KrispAudioProcessingImpl_Destroy(JNIEnv* env)
+static void JNI_UNUSED JNI_KrispAudioProcessingFactory_Destroy(
+	JNIEnv* env,
+	jlong native_module)
 {
-	delete apmPtr;
-	apmPtr = nullptr;
+	delete GetModule(native_module);
 }
+
+#undef JNI_UNUSED
 
 }
