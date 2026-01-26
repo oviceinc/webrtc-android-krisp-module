@@ -1,6 +1,9 @@
 #include "krisp_processor.hpp"
 
+#include <cstdio>
 #include <cstring>
+#include <errno.h>
+#include <sys/stat.h>
 
 #include <syslog.h>
 #include "krisp-audio-api-definitions-c.h"
@@ -13,6 +16,33 @@
 namespace Krisp
 {
 
+static void logCallback(const char* message, KrispLogLevel level)
+{
+    syslog(LOG_INFO, "KrispProcessor::logCallback: %s", message);
+    switch (level) {
+        case LogLevelTrace:
+            syslog(LOG_DEBUG, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelDebug:
+            syslog(LOG_DEBUG, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelInfo:
+            syslog(LOG_INFO, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelWarn:
+            syslog(LOG_WARNING, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelErr:
+            syslog(LOG_ERR, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelCritical:
+            syslog(LOG_CRIT, "KrispProcessor::logCallback: %s", message);
+            break;
+        case LogLevelOff:
+            break;
+    }
+}
+
 bool LoadKrisp(const char* krispDllPath)
 {
     if (!KrispSDK::LoadDll(krispDllPath))
@@ -21,7 +51,7 @@ bool LoadKrisp(const char* krispDllPath)
         return false;
     }
 
-    if (!KrispSDK::GlobalInit(nullptr, nullptr, KrispLogLevel::LogLevelOff))
+    if (!KrispSDK::GlobalInit(nullptr, logCallback, KrispLogLevel::LogLevelTrace))
     {
         syslog(LOG_ERR, "KrispProcessor::Init: Failed to initialize Krisp globals");
         return false;
@@ -67,6 +97,54 @@ static KrispSamplingRate GetSampleRate(size_t sampleRate)
     }
 }
 
+static bool IsModelSet(const KrispModelInfo& modelInfo)
+{
+    const bool hasPath = modelInfo.path != nullptr && modelInfo.path[0] != L'\0';
+    const bool hasBlob = modelInfo.blob.data != nullptr && modelInfo.blob.size > 0;
+    return hasPath || hasBlob;
+}
+
+static bool ValidateModelPath(const char* modelPath)
+{
+    if (!modelPath || modelPath[0] == '\0') {
+        syslog(LOG_ERR, "KrispProcessor::Init: model path is empty");
+        return false;
+    }
+
+    syslog(LOG_INFO, "KrispProcessor::Init: model path: %s", modelPath);
+
+    struct stat st;
+    if (stat(modelPath, &st) != 0) {
+        syslog(LOG_ERR, "KrispProcessor::Init: stat failed for %s: %s",
+               modelPath, strerror(errno));
+        return false;
+    }
+
+    if (st.st_size <= 0) {
+        syslog(LOG_ERR, "KrispProcessor::Init: model file is empty: %s", modelPath);
+        return false;
+    }
+
+    FILE* file = std::fopen(modelPath, "rb");
+    if (!file) {
+        syslog(LOG_ERR, "KrispProcessor::Init: fopen failed for %s: %s",
+               modelPath, strerror(errno));
+        return false;
+    }
+    unsigned char byte = 0;
+    size_t read = std::fread(&byte, 1, 1, file);
+    std::fclose(file);
+    if (read != 1) {
+        syslog(LOG_ERR, "KrispProcessor::Init: fread failed for %s: %s",
+               modelPath, strerror(errno));
+        return false;
+    }
+
+    syslog(LOG_INFO, "KrispProcessor::Init: model file size: %lld bytes",
+           static_cast<long long>(st.st_size));
+    return true;
+}
+
 inline std::wstring convertMBString2WString(const std::string& str)
 {
   std::wstring w(str.begin(), str.end());
@@ -82,7 +160,7 @@ KrispNoiseFilter::KrispNoiseFilter() :
 	m_bufferIn(),
 	m_bufferOut()
 {
-    m_modelInfo.path = nullptr;
+    m_modelInfo.path = L"";
     m_modelInfo.blob.data = nullptr;
     m_modelInfo.blob.size = 0;
     m_sessionConfig.enableSessionStats = false;
@@ -117,6 +195,9 @@ void KrispNoiseFilter::DeInit() {
 
 bool KrispNoiseFilter::Init(const char* modelPath)
 {
+    if (!ValidateModelPath(modelPath)) {
+        return false;
+    }
     m_modelPath = convertMBString2WString(modelPath);
     m_modelInfo.path = m_modelPath.c_str();
     m_modelInfo.blob.data = nullptr;
@@ -140,7 +221,7 @@ bool KrispNoiseFilter::Init(const void* modelAddr, unsigned int modelSize)
 {
     m_modelData.resize(modelSize);
     std::memcpy(m_modelData.data(), modelAddr, modelSize);
-    m_modelInfo.path = nullptr;
+    m_modelInfo.path = L"";
     m_modelInfo.blob.data = m_modelData.data();
     m_modelInfo.blob.size = modelSize;
 
@@ -171,6 +252,11 @@ void KrispNoiseFilter::InitializeSession(int sampleRate, int numberOfChannels)
     m_numberOfChannels = numberOfChannels;
     m_sessionConfig.inputSampleRate = GetSampleRate(sampleRate);
     m_sessionConfig.outputSampleRate = m_sessionConfig.inputSampleRate;
+
+    if (!IsModelSet(m_modelInfo)) {
+        syslog(LOG_INFO, "KrispProcessor::Initialize: model not loaded yet");
+        return;
+    }
 
     krispNcHandle newNcHandle = KrispSDK::CreateNcFloat(&m_sessionConfig);
     if (newNcHandle == 0)
@@ -223,6 +309,11 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
         }
         m_ncCachedHandle = newNcHandle;
 	}
+
+    if (!m_ncCachedHandle) {
+        syslog(LOG_DEBUG, "KrispProcessor::Process: Krisp session is not initialized");
+        return;
+    }
 
     size_t bufferSize = audioBuffer->num_frames();
     if (m_bufferIn.size() != bufferSize) {
@@ -286,10 +377,11 @@ void KrispAdapter::SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting set
     }
 }
 
-std::unique_ptr<NativeKrispModule> NativeKrispModule::Create()
+static std::unique_ptr<NativeKrispModule> BuildModule(
+    const std::shared_ptr<KrispNoiseFilter>& proc)
 {
     auto m = std::make_unique<NativeKrispModule>();
-    m->proc = std::make_shared<KrispNoiseFilter>();
+    m->proc = proc;
     m->apm = webrtc::AudioProcessingBuilder()
         .SetCapturePostProcessing(std::make_unique<KrispAdapter>(m->proc))
         .Create();
@@ -298,6 +390,31 @@ std::unique_ptr<NativeKrispModule> NativeKrispModule::Create()
     config.echo_canceller.mobile_mode = true;
     m->apm->ApplyConfig(config);
     return m;
+}
+
+std::unique_ptr<NativeKrispModule> NativeKrispModule::Create()
+{
+    return BuildModule(std::make_shared<KrispNoiseFilter>());
+}
+
+std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelPath(
+    const char* modelPath)
+{
+    auto proc = std::make_shared<KrispNoiseFilter>();
+    if (!proc->Init(modelPath)) {
+        return nullptr;
+    }
+    return BuildModule(proc);
+}
+
+std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelData(
+    const void* modelData, unsigned int modelSize)
+{
+    auto proc = std::make_shared<KrispNoiseFilter>();
+    if (!proc->Init(modelData, modelSize)) {
+        return nullptr;
+    }
+    return BuildModule(proc);
 }
 
 

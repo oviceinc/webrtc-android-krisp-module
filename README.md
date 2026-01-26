@@ -48,7 +48,7 @@ Make sure to specify correct file paths, these are hard coded sample values.
 Alternatively, you can load Krisp model by specifying model data content loaded into the memory.
 ```
 var modelData: ByteArray // = load the model into the memory
-audioProcessorModule.InitWithData(modelData)
+audioProcessorModule.Init(modelData)
 if (!retValue) {
     return null
 }

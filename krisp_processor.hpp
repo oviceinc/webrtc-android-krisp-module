@@ -77,6 +77,9 @@ struct NativeKrispModule {
     rtc::scoped_refptr<webrtc::AudioProcessing> apm;
 
     static std::unique_ptr<NativeKrispModule> Create();
+    static std::unique_ptr<NativeKrispModule> CreateWithModelPath(const char* modelPath);
+    static std::unique_ptr<NativeKrispModule> CreateWithModelData(
+        const void* modelData, unsigned int modelSize);
 };
 
 
