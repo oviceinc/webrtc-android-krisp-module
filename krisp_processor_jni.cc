@@ -6,12 +6,6 @@
 
 #include "sdk/android/src/jni/jni_helpers.h"
 
-
-namespace jni_zero {
-template <typename T>
-class JavaParamRef;
-}
-
 namespace Krisp {
 class Module {
 public:
@@ -19,8 +13,8 @@ public:
 		: module_(std::move(module)) {}
 
 	jlong GetAudioProcessorModule(JNIEnv* env);
-	jboolean Init(JNIEnv* env, const jni_zero::JavaParamRef<jstring>& modelPathRef);
-	jboolean InitWithData(JNIEnv* env, const jni_zero::JavaParamRef<jbyteArray>& modelDataRef);
+	jboolean Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPathRef);
+	jboolean InitWithData(JNIEnv* env, const webrtc::JavaParamRef<jbyteArray>& modelDataRef);
 	void Enable(JNIEnv* env, jboolean disable);
 	jboolean IsEnabled(JNIEnv* env);
 	void Destroy(JNIEnv* env);
@@ -118,7 +112,7 @@ jboolean Module::IsEnabled(JNIEnv* env)
 	return module_->proc->IsEnabled();
 }
 
-jboolean Module::Init(JNIEnv* env, const jni_zero::JavaParamRef<jstring>& modelPathRef)
+jboolean Module::Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPathRef)
 {
 	if (!module_ || !module_->proc) {
 		return false;
@@ -131,7 +125,7 @@ jboolean Module::Init(JNIEnv* env, const jni_zero::JavaParamRef<jstring>& modelP
 }
 
 jboolean Module::InitWithData(JNIEnv* env,
-	const jni_zero::JavaParamRef<jbyteArray>& modelDataRef)
+	const webrtc::JavaParamRef<jbyteArray>& modelDataRef)
 {
 	if (!module_ || !module_->proc) {
 		return false;

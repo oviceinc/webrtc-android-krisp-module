@@ -51,9 +51,10 @@ bool LoadKrisp(const char* krispDllPath)
         return false;
     }
 
-    if (!KrispSDK::GlobalInit(nullptr, logCallback, KrispLogLevel::LogLevelTrace))
+    if (!KrispSDK::GlobalInit(L"", logCallback, KrispLogLevel::LogLevelTrace))
     {
         syslog(LOG_ERR, "KrispProcessor::Init: Failed to initialize Krisp globals");
+        KrispSDK::UnloadDll();
         return false;
 	}
     return true;
