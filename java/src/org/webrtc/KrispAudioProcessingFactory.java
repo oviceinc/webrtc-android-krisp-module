@@ -73,7 +73,7 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
         destroyed = true;
   }
 
-  private static native void nativeEnable(long nativeModule, boolean disable);
+  private static native void nativeEnable(long nativeModule, boolean enable);
 
   private static native boolean nativeIsEnabled(long nativeModule);
 

@@ -51,16 +51,26 @@ bool LoadKrisp(const char* krispDllPath)
         return false;
     }
 
-    if (!KrispSDK::GlobalInit(L"", logCallback, KrispLogLevel::LogLevelTrace))
+    KrispRetVal globalInitRet = KrispSDK::GlobalInit(L"", logCallback, KrispLogLevel::LogLevelTrace);
+    const char* retStr = "Unknown";
+    switch (globalInitRet) {
+        case KrispRetValSuccess: retStr = "Success"; break;
+        case KrispRetValUnknowError: retStr = "UnknowError"; break;
+        case KrispRetValInternalError: retStr = "InternalError"; break;
+        case KrispRetValInvalidInput: retStr = "InvalidInput"; break;
+        default: break;
+    }
+    syslog(LOG_ERR, "KrispProcessor::LoadKrisp: GlobalInit returned %d (%s)", static_cast<int>(globalInitRet), retStr);
+    if (globalInitRet != KrispRetValSuccess)
     {
         syslog(LOG_ERR, "KrispProcessor::Init: Failed to initialize Krisp globals");
         KrispSDK::UnloadDll();
         return false;
-	}
+    }
     return true;
 }
 
-bool UnloadKrisp() 
+bool UnloadKrisp()
 {
     if (KrispSDK::GlobalDestroy() != KrispRetValSuccess)
     {
@@ -180,7 +190,7 @@ KrispNoiseFilter::~KrispNoiseFilter()
 }
 
 void KrispNoiseFilter::DeInit() {
-    if (m_ncCachedHandle) 
+    if (m_ncCachedHandle)
     {
         KrispSDK::DestroyNcFloat(m_ncCachedHandle);
         m_ncCachedHandle = 0;
@@ -237,6 +247,7 @@ bool KrispNoiseFilter::Init(const void* modelAddr, unsigned int modelSize)
 
 void KrispNoiseFilter::Enable(bool isEnable)
 {
+	syslog(LOG_INFO, "KrispProcessor::Enable: %s", isEnable ? "true" : "false");
 	m_isEnabled.store(isEnable, std::memory_order_release);
 }
 

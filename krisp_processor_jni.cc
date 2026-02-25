@@ -15,7 +15,7 @@ public:
 	jlong GetAudioProcessorModule(JNIEnv* env);
 	jboolean Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPathRef);
 	jboolean InitWithData(JNIEnv* env, const webrtc::JavaParamRef<jbyteArray>& modelDataRef);
-	void Enable(JNIEnv* env, jboolean disable);
+	void Enable(JNIEnv* env, jboolean enable);
 	jboolean IsEnabled(JNIEnv* env);
 	void Destroy(JNIEnv* env);
 
@@ -95,13 +95,14 @@ jboolean JNI_UNUSED JNI_KrispAudioProcessingFactory_UnloadKrisp(JNIEnv* env)
 	return static_cast<jboolean>(UnloadKrisp());
 }
 
-void Module::Enable(JNIEnv* env, jboolean disable)
+void Module::Enable(JNIEnv* env, jboolean enable)
 {
-	if (!module_ || !module_->apm) {
+	if (!module_ || !module_->proc) {
 		return;
 	}
 	module_->apm->SetRuntimeSetting(
-		webrtc::AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(disable));
+               webrtc::AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(enable));
+	module_->proc->Enable(static_cast<bool>(enable));
 }
 
 jboolean Module::IsEnabled(JNIEnv* env)
@@ -121,7 +122,7 @@ jboolean Module::Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPat
 	const char *modelFilePath = env->GetStringUTFChars(javaModelPath, nullptr);
 	bool retValue = module_->proc->Init(modelFilePath);
 	env->ReleaseStringUTFChars(javaModelPath, modelFilePath);
-	return static_cast<jboolean>(retValue); 
+	return static_cast<jboolean>(retValue);
 }
 
 jboolean Module::InitWithData(JNIEnv* env,
@@ -138,7 +139,7 @@ jboolean Module::InitWithData(JNIEnv* env,
 	std::memcpy(modelData.get(), javaModelData, arraySize);
 	bool retValue = module_->proc->Init(modelData.get(), arraySize);
 	env->ReleaseByteArrayElements(javaByteArray, javaModelData, JNI_ABORT);
-	return static_cast<jboolean>(retValue); 
+	return static_cast<jboolean>(retValue);
 }
 
 void Module::Destroy(JNIEnv* env)
