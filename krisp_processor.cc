@@ -1,5 +1,7 @@
 #include "krisp_processor.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <errno.h>
@@ -18,7 +20,6 @@ namespace Krisp
 
 static void logCallback(const char* message, KrispLogLevel level)
 {
-    syslog(LOG_INFO, "KrispProcessor::logCallback: %s", message);
     switch (level) {
         case LogLevelTrace:
             syslog(LOG_DEBUG, "KrispProcessor::logCallback: %s", message);
@@ -52,15 +53,6 @@ bool LoadKrisp(const char* krispDllPath)
     }
 
     KrispRetVal globalInitRet = KrispSDK::GlobalInit(L"", logCallback, KrispLogLevel::LogLevelTrace);
-    const char* retStr = "Unknown";
-    switch (globalInitRet) {
-        case KrispRetValSuccess: retStr = "Success"; break;
-        case KrispRetValUnknowError: retStr = "UnknowError"; break;
-        case KrispRetValInternalError: retStr = "InternalError"; break;
-        case KrispRetValInvalidInput: retStr = "InvalidInput"; break;
-        default: break;
-    }
-    syslog(LOG_ERR, "KrispProcessor::LoadKrisp: GlobalInit returned %d (%s)", static_cast<int>(globalInitRet), retStr);
     if (globalInitRet != KrispRetValSuccess)
     {
         syslog(LOG_ERR, "KrispProcessor::Init: Failed to initialize Krisp globals");
@@ -122,8 +114,6 @@ static bool ValidateModelPath(const char* modelPath)
         return false;
     }
 
-    syslog(LOG_INFO, "KrispProcessor::Init: model path: %s", modelPath);
-
     struct stat st;
     if (stat(modelPath, &st) != 0) {
         syslog(LOG_ERR, "KrispProcessor::Init: stat failed for %s: %s",
@@ -151,8 +141,6 @@ static bool ValidateModelPath(const char* modelPath)
         return false;
     }
 
-    syslog(LOG_INFO, "KrispProcessor::Init: model file size: %lld bytes",
-           static_cast<long long>(st.st_size));
     return true;
 }
 
@@ -162,13 +150,17 @@ inline std::wstring convertMBString2WString(const std::string& str)
   return w;
 }
 
+// ---------------------------------------------------------------------------
+// KrispNoiseFilter
+// ---------------------------------------------------------------------------
+
 KrispNoiseFilter::KrispNoiseFilter() :
+    AudioFrameProcessor(),
     m_isEnabled(false),
 	m_numberOfChannels(1),
     m_lastTimeStamp(0),
     m_modelPath(),
     m_modelData(),
-	m_bufferIn(),
 	m_bufferOut()
 {
     m_modelInfo.path = L"";
@@ -185,7 +177,6 @@ KrispNoiseFilter::KrispNoiseFilter() :
 
 KrispNoiseFilter::~KrispNoiseFilter()
 {
-    syslog(LOG_INFO,"KrispProcessor::~KrispProcessor()");
     DeInit();
 }
 
@@ -278,19 +269,27 @@ void KrispNoiseFilter::InitializeSession(int sampleRate, int numberOfChannels)
     }
     if (m_ncCachedHandle && KrispSDK::DestroyNcFloat(m_ncCachedHandle) != KrispRetValSuccess) {
         syslog(LOG_ERR, "KrispProcessor::Initialize: Failed to destroy Krisp NC session");
-        // TODO: handle memory leak
     }
     m_ncCachedHandle = newNcHandle;
 }
 
 void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
 {
+    if (!IsEnabled()) {
+        AudioFrameProcessor::ProcessFrame(audioBuffer);
+        return;
+    }
 
-	if(!KrispNoiseFilter::IsEnabled())
-    {
-        syslog(LOG_DEBUG, "KrispProcessor::Process: Bypassing NoiseSuppressor::Process");
-	    return;
-	}
+    const int audioBufferSampleRate = audioBuffer->num_frames() * 100;
+    const size_t bufferSize = audioBuffer->num_frames();
+
+    if (m_bufferIn.size() != bufferSize) {
+        m_bufferIn.resize(bufferSize);
+    }
+
+    for (size_t i = 0; i < bufferSize; ++i) {
+        m_bufferIn[i] = audioBuffer->channels()[0][i] / 32768.f;
+    }
 
     auto now = rtc::TimeMillis();
     if (now - m_lastTimeStamp > 10000)
@@ -298,11 +297,10 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
         syslog(LOG_INFO,"KrispProcessor::Process: Num Frames: %zu\
              num Bands: %zu  Num Channels: %zu ", audioBuffer->num_frames(),
              audioBuffer->num_bands(), audioBuffer->num_channels());
-      m_lastTimeStamp = now;
+        m_lastTimeStamp = now;
     }
 
-    int audioBufferSampleRate = audioBuffer->num_frames() * 100;
-	if(audioBufferSampleRate != static_cast<int>(m_sessionConfig.inputSampleRate))
+    if (audioBufferSampleRate != static_cast<int>(m_sessionConfig.inputSampleRate))
     {
         m_sessionConfig.inputSampleRate = GetSampleRate(audioBufferSampleRate);
         m_sessionConfig.outputSampleRate = m_sessionConfig.inputSampleRate;
@@ -310,34 +308,25 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
         if (newNcHandle == 0)
         {
             syslog(LOG_ERR, "KrispProcessor::Process: Failed to create Krisp NC session");
+            ResampleAndDeliver(m_bufferIn.data(), bufferSize, audioBufferSampleRate);
             return;
         }
         if (m_ncCachedHandle)
         {
             if (KrispSDK::DestroyNcFloat(m_ncCachedHandle) != KrispRetValSuccess) {
                 syslog(LOG_ERR, "KrispProcessor::Process: Failed to destroy Krisp NC session");
-                // TODO: handle memory leak
             }
         }
         m_ncCachedHandle = newNcHandle;
-	}
+    }
 
     if (!m_ncCachedHandle) {
-        syslog(LOG_DEBUG, "KrispProcessor::Process: Krisp session is not initialized");
+        ResampleAndDeliver(m_bufferIn.data(), bufferSize, audioBufferSampleRate);
         return;
     }
 
-    size_t bufferSize = audioBuffer->num_frames();
-    if (m_bufferIn.size() != bufferSize) {
-        m_bufferIn.resize(bufferSize);
-    }
     if (m_bufferOut.size() != bufferSize) {
         m_bufferOut.resize(bufferSize);
-    }
-
-    for (size_t i = 0; i < bufferSize; ++i)
-    {
-        m_bufferIn[i] = audioBuffer->channels()[0][i] / 32768.f;
     }
 
     auto returnCode = KrispSDK::ProcessNcFloat(
@@ -348,29 +337,34 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
     if (returnCode != KrispRetValSuccess)
     {
         syslog(LOG_INFO, "KrispProcessor::Process: Krisp noise cleanup error");
+        ResampleAndDeliver(m_bufferIn.data(), bufferSize, audioBufferSampleRate);
         return;
     }
 
-    for (size_t i = 0; i < bufferSize; ++i)
-    {
+    for (size_t i = 0; i < bufferSize; ++i) {
         audioBuffer->channels()[0][i] = m_bufferOut[i] * 32768.f;
     }
+
+    ResampleAndDeliver(m_bufferOut.data(), bufferSize, audioBufferSampleRate);
 }
 
+// ---------------------------------------------------------------------------
+// KrispAdapter
+// ---------------------------------------------------------------------------
 
-KrispAdapter::KrispAdapter(const std::shared_ptr<KrispNoiseFilter>& krispProcessor) :
-    m_krispProcessor(krispProcessor)
+KrispAdapter::KrispAdapter(const std::shared_ptr<AudioFrameProcessor>& processor) :
+    m_processor(processor)
 {
 }
 
 void KrispAdapter::Initialize(int sampleRate, int numOfChannels)
 {
-    m_krispProcessor->InitializeSession(sampleRate, numOfChannels);
+    m_processor->InitializeSession(sampleRate, numOfChannels);
 }
 
 void KrispAdapter::Process(webrtc::AudioBuffer* audioBuffer)
 {
-    m_krispProcessor->ProcessFrame(audioBuffer);
+    m_processor->ProcessFrame(audioBuffer);
 }
 
 std::string KrispAdapter::ToString() const
@@ -378,19 +372,16 @@ std::string KrispAdapter::ToString() const
     return "KrispAudioProcessor";
 }
 
-void KrispAdapter::SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting setting)
+void KrispAdapter::SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting /*setting*/)
 {
-    if (setting.type() ==
-        webrtc::AudioProcessing::RuntimeSetting::Type::kCaptureOutputUsed)
-    {
-        bool enable = false;
-        setting.GetBool(&enable);
-        m_krispProcessor->Enable(enable);
-    }
 }
 
+// ---------------------------------------------------------------------------
+// NativeKrispModule
+// ---------------------------------------------------------------------------
+
 static std::unique_ptr<NativeKrispModule> BuildModule(
-    const std::shared_ptr<KrispNoiseFilter>& proc)
+    const std::shared_ptr<AudioFrameProcessor>& proc)
 {
     auto m = std::make_unique<NativeKrispModule>();
     m->proc = proc;
@@ -406,7 +397,7 @@ static std::unique_ptr<NativeKrispModule> BuildModule(
 
 std::unique_ptr<NativeKrispModule> NativeKrispModule::Create()
 {
-    return BuildModule(std::make_shared<KrispNoiseFilter>());
+    return BuildModule(std::make_shared<AudioFrameProcessor>());
 }
 
 std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelPath(
@@ -416,7 +407,9 @@ std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelPath(
     if (!proc->Init(modelPath)) {
         return nullptr;
     }
-    return BuildModule(proc);
+    auto m = BuildModule(proc);
+    m->krispFilter = proc.get();
+    return m;
 }
 
 std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelData(
@@ -426,7 +419,9 @@ std::unique_ptr<NativeKrispModule> NativeKrispModule::CreateWithModelData(
     if (!proc->Init(modelData, modelSize)) {
         return nullptr;
     }
-    return BuildModule(proc);
+    auto m = BuildModule(proc);
+    m->krispFilter = proc.get();
+    return m;
 }
 
 
