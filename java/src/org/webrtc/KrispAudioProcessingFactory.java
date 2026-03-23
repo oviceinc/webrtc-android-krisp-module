@@ -2,8 +2,13 @@ package org.webrtc;
 import org.webrtc.AudioProcessingFactory;
 
 public class KrispAudioProcessingFactory implements AudioProcessingFactory {
+  public interface AudioDataListener {
+      void onAudioData(short[] data, int sampleRate);
+  }
+
   private long nativeModule;
     private boolean destroyed;
+    private AudioDataListener audioDataListener;
 
     private long requireNativeModule(String caller) {
         if (destroyed) {
@@ -32,6 +37,17 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
 
   public static boolean UnloadKrisp() {
       return nativeUnloadKrisp();
+  }
+
+  public boolean Init() {
+        if (destroyed) {
+            throw new IllegalStateException("KrispAudioProcessingFactory is destroyed");
+        }
+        if (nativeModule == 0) {
+            nativeModule = nativeCreateModule();
+            return nativeModule != 0;
+        }
+        return true;
   }
 
   public boolean Init(String modelPath) {
@@ -66,11 +82,27 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
         return nativeIsEnabled(module);
   }
 
+  public void setAudioDataListener(AudioDataListener listener) {
+      this.audioDataListener = listener;
+      if (nativeModule != 0 && !destroyed) {
+          nativeSetAudioDataListener(nativeModule, listener != null ? this : null);
+      }
+  }
+
+  @SuppressWarnings("unused")
+  private void onAudioDataFromNative(short[] data) {
+      AudioDataListener listener = this.audioDataListener;
+      if (listener != null) {
+          listener.onAudioData(data, 16000);
+      }
+  }
+
   public void Destroy() {
         long module = requireNativeModule("Destroy");
         nativeDestroy(module);
       nativeModule = 0;
         destroyed = true;
+        audioDataListener = null;
   }
 
   private static native void nativeEnable(long nativeModule, boolean enable);
@@ -94,4 +126,7 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
     private static native long nativeCreateModuleWithModelPath(String modelPath);
 
     private static native long nativeCreateModuleWithModelData(byte[] modelData);
+
+    private static native void nativeSetAudioDataListener(
+        long nativeModule, KrispAudioProcessingFactory factory);
 }

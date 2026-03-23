@@ -6,21 +6,69 @@
 
 #include "sdk/android/src/jni/jni_helpers.h"
 
+namespace {
+
+JNIEnv* GetCachedJNIEnv(JavaVM* jvm) {
+	struct JNIEnvGuard {
+		JavaVM* vm = nullptr;
+		JNIEnv* env = nullptr;
+		bool attached = false;
+		~JNIEnvGuard() {
+			if (attached && vm) {
+				vm->DetachCurrentThread();
+			}
+		}
+	};
+	static thread_local JNIEnvGuard guard;
+
+	if (guard.env && guard.vm == jvm) {
+		return guard.env;
+	}
+
+	JNIEnv* env = nullptr;
+	jint res = jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+	if (res == JNI_EDETACHED) {
+		if (jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+			return nullptr;
+		}
+		guard.attached = true;
+	} else if (res != JNI_OK) {
+		return nullptr;
+	}
+	guard.vm = jvm;
+	guard.env = env;
+	return env;
+}
+
+}  // namespace
+
 namespace Krisp {
 class Module {
 public:
 	explicit Module(std::unique_ptr<NativeKrispModule> module)
 		: module_(std::move(module)) {}
 
+	~Module() {
+		ClearListener(nullptr);
+	}
+
 	jlong GetAudioProcessorModule(JNIEnv* env);
 	jboolean Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPathRef);
 	jboolean InitWithData(JNIEnv* env, const webrtc::JavaParamRef<jbyteArray>& modelDataRef);
 	void Enable(JNIEnv* env, jboolean enable);
 	jboolean IsEnabled(JNIEnv* env);
+	void SetAudioDataListener(JNIEnv* env,
+		const webrtc::JavaParamRef<jobject>& factoryObj);
 	void Destroy(JNIEnv* env);
 
 private:
+	void ClearListener(JNIEnv* env);
+
 	std::unique_ptr<NativeKrispModule> module_;
+	JavaVM* jvm_ = nullptr;
+	jobject javaFactoryRef_ = nullptr;
+	jmethodID onAudioDataMethodId_ = nullptr;
+	jshortArray javaShortArrayRef_ = nullptr;
 };
 }
 
@@ -100,8 +148,6 @@ void Module::Enable(JNIEnv* env, jboolean enable)
 	if (!module_ || !module_->proc) {
 		return;
 	}
-	module_->apm->SetRuntimeSetting(
-               webrtc::AudioProcessing::RuntimeSetting::CreateCaptureOutputUsedSetting(enable));
 	module_->proc->Enable(static_cast<bool>(enable));
 }
 
@@ -115,12 +161,12 @@ jboolean Module::IsEnabled(JNIEnv* env)
 
 jboolean Module::Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPathRef)
 {
-	if (!module_ || !module_->proc) {
+	if (!module_ || !module_->krispFilter) {
 		return false;
 	}
 	jstring javaModelPath = modelPathRef.obj();
 	const char *modelFilePath = env->GetStringUTFChars(javaModelPath, nullptr);
-	bool retValue = module_->proc->Init(modelFilePath);
+	bool retValue = module_->krispFilter->Init(modelFilePath);
 	env->ReleaseStringUTFChars(javaModelPath, modelFilePath);
 	return static_cast<jboolean>(retValue);
 }
@@ -128,7 +174,7 @@ jboolean Module::Init(JNIEnv* env, const webrtc::JavaParamRef<jstring>& modelPat
 jboolean Module::InitWithData(JNIEnv* env,
 	const webrtc::JavaParamRef<jbyteArray>& modelDataRef)
 {
-	if (!module_ || !module_->proc) {
+	if (!module_ || !module_->krispFilter) {
 		return false;
 	}
 	jbyteArray javaByteArray = modelDataRef.obj();
@@ -137,13 +183,80 @@ jboolean Module::InitWithData(JNIEnv* env,
 	size_t arraySize = static_cast<unsigned int>(javaModelSize);
 	std::unique_ptr<char[]> modelData(new char[arraySize]);
 	std::memcpy(modelData.get(), javaModelData, arraySize);
-	bool retValue = module_->proc->Init(modelData.get(), arraySize);
+	bool retValue = module_->krispFilter->Init(modelData.get(), arraySize);
 	env->ReleaseByteArrayElements(javaByteArray, javaModelData, JNI_ABORT);
 	return static_cast<jboolean>(retValue);
 }
 
+void Module::ClearListener(JNIEnv* env) {
+	if (module_ && module_->proc) {
+		module_->proc->SetAudioFrameCallback(nullptr);
+	}
+	if (!env && jvm_) {
+		jvm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+	}
+	if (javaShortArrayRef_) {
+		if (env) {
+			env->DeleteGlobalRef(javaShortArrayRef_);
+		}
+		javaShortArrayRef_ = nullptr;
+	}
+	if (javaFactoryRef_) {
+		if (env) {
+			env->DeleteGlobalRef(javaFactoryRef_);
+		}
+		javaFactoryRef_ = nullptr;
+	}
+	onAudioDataMethodId_ = nullptr;
+}
+
+void Module::SetAudioDataListener(JNIEnv* env,
+	const webrtc::JavaParamRef<jobject>& factoryObj)
+{
+	ClearListener(env);
+
+	if (!factoryObj.obj() || !module_ || !module_->proc) {
+		return;
+	}
+
+	env->GetJavaVM(&jvm_);
+	javaFactoryRef_ = env->NewGlobalRef(factoryObj.obj());
+	jclass cls = env->GetObjectClass(factoryObj.obj());
+	onAudioDataMethodId_ = env->GetMethodID(cls, "onAudioDataFromNative", "([S)V");
+
+	static constexpr jsize kJniFrameSize = 3200;  // matches kAccumFrameSize
+	jshortArray localArray = env->NewShortArray(kJniFrameSize);
+	javaShortArrayRef_ = static_cast<jshortArray>(env->NewGlobalRef(localArray));
+	env->DeleteLocalRef(localArray);
+
+	JavaVM* jvm = jvm_;
+	jobject ref = javaFactoryRef_;
+	jmethodID mid = onAudioDataMethodId_;
+	jshortArray jdata = javaShortArrayRef_;
+
+	module_->proc->SetAudioFrameCallback(
+		[jvm, ref, mid, jdata](const int16_t* data, size_t count) {
+			JNIEnv* cbEnv = GetCachedJNIEnv(jvm);
+			if (!cbEnv) {
+				syslog(LOG_ERR, "KrispJNI::callback: GetCachedJNIEnv returned null");
+				return;
+			}
+
+			cbEnv->SetShortArrayRegion(jdata, 0, static_cast<jsize>(count),
+				reinterpret_cast<const jshort*>(data));
+			cbEnv->CallVoidMethod(ref, mid, jdata);
+
+			if (cbEnv->ExceptionCheck()) {
+				syslog(LOG_ERR, "KrispJNI::callback: Java exception in onAudioDataFromNative");
+				cbEnv->ExceptionDescribe();
+				cbEnv->ExceptionClear();
+			}
+		});
+}
+
 void Module::Destroy(JNIEnv* env)
 {
+	ClearListener(env);
 	delete this;
 }
 
