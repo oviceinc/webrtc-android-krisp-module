@@ -34,16 +34,21 @@ public:
     void Enable(bool isEnable) override;
     bool IsEnabled() const override;
 
+protected:
+    float GetVoiceConfidence(const int16_t* data, size_t len) override;
+
 private:
     std::atomic<bool> m_isEnabled;
     int m_numberOfChannels;
-    long m_lastTimeStamp;
     std::wstring m_modelPath;
     std::vector<uint8_t> m_modelData;
     std::vector<float> m_bufferOut;
     KrispModelInfo m_modelInfo;
     KrispNcSessionConfig m_sessionConfig;
     krispNcHandle m_ncCachedHandle;
+
+    float m_voiceEnergySum = 0.f;
+    uint32_t m_voiceEnergyFrameCount = 0;
 };
 
 class KrispAdapter : public webrtc::CustomProcessing

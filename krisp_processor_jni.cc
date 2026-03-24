@@ -1,6 +1,5 @@
 #include "krisp_processor.hpp"
 
-#include <syslog.h>
 #include <cstring>
 #include <memory>
 
@@ -68,6 +67,7 @@ private:
 	JavaVM* jvm_ = nullptr;
 	jobject javaFactoryRef_ = nullptr;
 	jmethodID onAudioDataMethodId_ = nullptr;
+	jmethodID onVADStateChangeMethodId_ = nullptr;
 	jshortArray javaShortArrayRef_ = nullptr;
 };
 }
@@ -191,6 +191,7 @@ jboolean Module::InitWithData(JNIEnv* env,
 void Module::ClearListener(JNIEnv* env) {
 	if (module_ && module_->proc) {
 		module_->proc->SetAudioFrameCallback(nullptr);
+		module_->proc->SetVADStateCallback(nullptr);
 	}
 	if (!env && jvm_) {
 		jvm_->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
@@ -208,6 +209,7 @@ void Module::ClearListener(JNIEnv* env) {
 		javaFactoryRef_ = nullptr;
 	}
 	onAudioDataMethodId_ = nullptr;
+	onVADStateChangeMethodId_ = nullptr;
 }
 
 void Module::SetAudioDataListener(JNIEnv* env,
@@ -222,9 +224,10 @@ void Module::SetAudioDataListener(JNIEnv* env,
 	env->GetJavaVM(&jvm_);
 	javaFactoryRef_ = env->NewGlobalRef(factoryObj.obj());
 	jclass cls = env->GetObjectClass(factoryObj.obj());
-	onAudioDataMethodId_ = env->GetMethodID(cls, "onAudioDataFromNative", "([S)V");
+	onAudioDataMethodId_ = env->GetMethodID(cls, "onAudioDataFromNative", "([SFF)V");
+	onVADStateChangeMethodId_ = env->GetMethodID(cls, "onVADStateChangeFromNative", "(Z)V");
 
-	static constexpr jsize kJniFrameSize = 3200;  // matches kAccumFrameSize
+	static constexpr jsize kJniFrameSize = 1600;  // matches kAccumFrameSize
 	jshortArray localArray = env->NewShortArray(kJniFrameSize);
 	javaShortArrayRef_ = static_cast<jshortArray>(env->NewGlobalRef(localArray));
 	env->DeleteLocalRef(localArray);
@@ -235,20 +238,36 @@ void Module::SetAudioDataListener(JNIEnv* env,
 	jshortArray jdata = javaShortArrayRef_;
 
 	module_->proc->SetAudioFrameCallback(
-		[jvm, ref, mid, jdata](const int16_t* data, size_t count) {
+		[jvm, ref, mid, jdata](const int16_t* data, size_t count,
+			float confidence, float voiceEnergy) {
 			JNIEnv* cbEnv = GetCachedJNIEnv(jvm);
 			if (!cbEnv) {
-				syslog(LOG_ERR, "KrispJNI::callback: GetCachedJNIEnv returned null");
 				return;
 			}
 
 			cbEnv->SetShortArrayRegion(jdata, 0, static_cast<jsize>(count),
 				reinterpret_cast<const jshort*>(data));
-			cbEnv->CallVoidMethod(ref, mid, jdata);
+			cbEnv->CallVoidMethod(ref, mid, jdata,
+				static_cast<jfloat>(confidence),
+				static_cast<jfloat>(voiceEnergy));
 
 			if (cbEnv->ExceptionCheck()) {
-				syslog(LOG_ERR, "KrispJNI::callback: Java exception in onAudioDataFromNative");
-				cbEnv->ExceptionDescribe();
+				cbEnv->ExceptionClear();
+			}
+		});
+
+	jmethodID vadMid = onVADStateChangeMethodId_;
+	module_->proc->SetVADStateCallback(
+		[jvm, ref, vadMid](bool isSpeech) {
+			JNIEnv* cbEnv = GetCachedJNIEnv(jvm);
+			if (!cbEnv) {
+				return;
+			}
+
+			cbEnv->CallVoidMethod(ref, vadMid,
+				static_cast<jboolean>(isSpeech));
+
+			if (cbEnv->ExceptionCheck()) {
 				cbEnv->ExceptionClear();
 			}
 		});

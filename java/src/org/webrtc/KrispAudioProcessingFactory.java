@@ -3,12 +3,17 @@ import org.webrtc.AudioProcessingFactory;
 
 public class KrispAudioProcessingFactory implements AudioProcessingFactory {
   public interface AudioDataListener {
-      void onAudioData(short[] data, int sampleRate);
+      void onAudioData(short[] data, int sampleRate, float confidence, float voiceEnergy);
+  }
+
+  public interface VADStateListener {
+      void onVADStateChange(boolean isSpeech);
   }
 
   private long nativeModule;
     private boolean destroyed;
     private AudioDataListener audioDataListener;
+    private VADStateListener vadStateListener;
 
     private long requireNativeModule(String caller) {
         if (destroyed) {
@@ -45,6 +50,9 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
         }
         if (nativeModule == 0) {
             nativeModule = nativeCreateModule();
+            if (nativeModule != 0 && audioDataListener != null) {
+                nativeSetAudioDataListener(nativeModule, this);
+            }
             return nativeModule != 0;
         }
         return true;
@@ -56,6 +64,9 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
         }
         if (nativeModule == 0) {
             nativeModule = nativeCreateModuleWithModelPath(modelPath);
+            if (nativeModule != 0 && audioDataListener != null) {
+                nativeSetAudioDataListener(nativeModule, this);
+            }
             return nativeModule != 0;
         }
       return nativeInit(nativeModule, modelPath);
@@ -67,6 +78,9 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
         }
         if (nativeModule == 0) {
             nativeModule = nativeCreateModuleWithModelData(modelData);
+            if (nativeModule != 0 && audioDataListener != null) {
+                nativeSetAudioDataListener(nativeModule, this);
+            }
             return nativeModule != 0;
         }
       return nativeInitWithData(nativeModule, modelData);
@@ -89,11 +103,23 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
       }
   }
 
+  public void setVADStateListener(VADStateListener listener) {
+      this.vadStateListener = listener;
+  }
+
   @SuppressWarnings("unused")
-  private void onAudioDataFromNative(short[] data) {
+  private void onAudioDataFromNative(short[] data, float confidence, float voiceEnergy) {
       AudioDataListener listener = this.audioDataListener;
       if (listener != null) {
-          listener.onAudioData(data, 16000);
+          listener.onAudioData(data, 16000, confidence, voiceEnergy);
+      }
+  }
+
+  @SuppressWarnings("unused")
+  private void onVADStateChangeFromNative(boolean isSpeech) {
+      VADStateListener listener = this.vadStateListener;
+      if (listener != null) {
+          listener.onVADStateChange(isSpeech);
       }
   }
 
@@ -103,6 +129,7 @@ public class KrispAudioProcessingFactory implements AudioProcessingFactory {
       nativeModule = 0;
         destroyed = true;
         audioDataListener = null;
+        vadStateListener = null;
   }
 
   private static native void nativeEnable(long nativeModule, boolean enable);
