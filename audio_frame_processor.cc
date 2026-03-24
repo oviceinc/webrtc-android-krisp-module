@@ -1,7 +1,7 @@
 #include "audio_frame_processor.hpp"
 
 #include <algorithm>
-#include <syslog.h>
+#include <cmath>
 
 namespace Krisp
 {
@@ -48,6 +48,30 @@ void AudioFrameProcessor::SetAudioFrameCallback(AudioFrameCallback callback)
     std::lock_guard<std::mutex> lock(m_callbackMutex);
     m_audioFrameCallback = std::move(callback);
     m_accumPos = 0;
+    m_isSpeaking = false;
+    m_silenceAccumMs = 0;
+}
+
+void AudioFrameProcessor::SetVADStateCallback(VADStateCallback callback)
+{
+    std::lock_guard<std::mutex> lock(m_callbackMutex);
+    m_vadStateCallback = std::move(callback);
+}
+
+float AudioFrameProcessor::GetVoiceConfidence(const int16_t* data, size_t len)
+{
+    if (len == 0) {
+        m_lastVoiceEnergy = 0.f;
+        return 0.f;
+    }
+    double sumSq = 0;
+    for (size_t i = 0; i < len; ++i) {
+        double s = static_cast<double>(data[i]);
+        sumSq += s * s;
+    }
+    double rms = std::sqrt(sumSq / len);
+    m_lastVoiceEnergy = static_cast<float>(std::min(100.0, rms / 20.0));
+    return static_cast<float>(std::min(1.0, std::max(0.0, (rms - 100.0) / 1900.0)));
 }
 
 void AudioFrameProcessor::ResampleAndDeliver(const float* src, size_t srcLen, int srcRate)
@@ -95,7 +119,39 @@ void AudioFrameProcessor::ResampleAndDeliver(const float* src, size_t srcLen, in
         i += chunk;
 
         if (m_accumPos >= kAccumFrameSize) {
-            m_audioFrameCallback(m_accumBuffer.data(), kAccumFrameSize);
+            float confidence = GetVoiceConfidence(
+                m_accumBuffer.data(), kAccumFrameSize);
+            bool shouldDeliver = false;
+            bool prevSpeaking = m_isSpeaking;
+
+            if (m_isSpeaking) {
+                if (confidence < kNegativeSpeechThreshold) {
+                    m_silenceAccumMs += kAccumFrameDurationMs;
+                    if (m_silenceAccumMs >= kRedemptionMs) {
+                        m_isSpeaking = false;
+                    } else {
+                        shouldDeliver = true;
+                    }
+                } else {
+                    m_silenceAccumMs = 0;
+                    shouldDeliver = true;
+                }
+            } else {
+                if (confidence >= kPositiveSpeechThreshold) {
+                    m_isSpeaking = true;
+                    m_silenceAccumMs = 0;
+                    shouldDeliver = true;
+                }
+            }
+
+            if (m_isSpeaking != prevSpeaking && m_vadStateCallback) {
+                m_vadStateCallback(m_isSpeaking);
+            }
+
+            if (shouldDeliver) {
+                m_audioFrameCallback(m_accumBuffer.data(), kAccumFrameSize,
+                                     confidence, m_lastVoiceEnergy);
+            }
             m_accumPos = 0;
         }
     }

@@ -10,7 +10,6 @@
 #include <syslog.h>
 #include "krisp-audio-api-definitions-c.h"
 #include "krisp-audio-sdk-nc-c.h"
-#include "rtc_base/time_utils.h"
 
 #include "krisp_sdk.h"
 
@@ -158,7 +157,6 @@ KrispNoiseFilter::KrispNoiseFilter() :
     AudioFrameProcessor(),
     m_isEnabled(false),
 	m_numberOfChannels(1),
-    m_lastTimeStamp(0),
     m_modelPath(),
     m_modelData(),
 	m_bufferOut()
@@ -238,7 +236,6 @@ bool KrispNoiseFilter::Init(const void* modelAddr, unsigned int modelSize)
 
 void KrispNoiseFilter::Enable(bool isEnable)
 {
-	syslog(LOG_INFO, "KrispProcessor::Enable: %s", isEnable ? "true" : "false");
 	m_isEnabled.store(isEnable, std::memory_order_release);
 }
 
@@ -249,15 +246,11 @@ bool KrispNoiseFilter::IsEnabled() const
 
 void KrispNoiseFilter::InitializeSession(int sampleRate, int numberOfChannels)
 {
-	syslog(LOG_INFO, "KrispProcessor::Initialize: sampleRate: %i\
-        numberOfChannels: %i", sampleRate, numberOfChannels);
-
     m_numberOfChannels = numberOfChannels;
     m_sessionConfig.inputSampleRate = GetSampleRate(sampleRate);
     m_sessionConfig.outputSampleRate = m_sessionConfig.inputSampleRate;
 
     if (!IsModelSet(m_modelInfo)) {
-        syslog(LOG_INFO, "KrispProcessor::Initialize: model not loaded yet");
         return;
     }
 
@@ -291,15 +284,6 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
         m_bufferIn[i] = audioBuffer->channels()[0][i] / 32768.f;
     }
 
-    auto now = rtc::TimeMillis();
-    if (now - m_lastTimeStamp > 10000)
-    {
-        syslog(LOG_INFO,"KrispProcessor::Process: Num Frames: %zu\
-             num Bands: %zu  Num Channels: %zu ", audioBuffer->num_frames(),
-             audioBuffer->num_bands(), audioBuffer->num_channels());
-        m_lastTimeStamp = now;
-    }
-
     if (audioBufferSampleRate != static_cast<int>(m_sessionConfig.inputSampleRate))
     {
         m_sessionConfig.inputSampleRate = GetSampleRate(audioBufferSampleRate);
@@ -329,23 +313,38 @@ void KrispNoiseFilter::ProcessFrame(webrtc::AudioBuffer* audioBuffer)
         m_bufferOut.resize(bufferSize);
     }
 
+    KrispNcPerFrameStats frameStats{};
     auto returnCode = KrispSDK::ProcessNcFloat(
         m_ncCachedHandle,
         m_bufferIn.data(), bufferSize,
-        m_bufferOut.data(), bufferSize, 100.0f, nullptr);
+        m_bufferOut.data(), bufferSize, 100.0f, &frameStats);
 
     if (returnCode != KrispRetValSuccess)
     {
-        syslog(LOG_INFO, "KrispProcessor::Process: Krisp noise cleanup error");
         ResampleAndDeliver(m_bufferIn.data(), bufferSize, audioBufferSampleRate);
         return;
     }
+
+    m_voiceEnergySum += static_cast<float>(frameStats.energy.voiceEnergy);
+    m_voiceEnergyFrameCount++;
 
     for (size_t i = 0; i < bufferSize; ++i) {
         audioBuffer->channels()[0][i] = m_bufferOut[i] * 32768.f;
     }
 
     ResampleAndDeliver(m_bufferOut.data(), bufferSize, audioBufferSampleRate);
+}
+
+float KrispNoiseFilter::GetVoiceConfidence(const int16_t* data, size_t len)
+{
+    if (IsEnabled() && m_voiceEnergyFrameCount > 0) {
+        float avg = m_voiceEnergySum / static_cast<float>(m_voiceEnergyFrameCount);
+        m_voiceEnergySum = 0.f;
+        m_voiceEnergyFrameCount = 0;
+        m_lastVoiceEnergy = avg;
+        return avg / 100.0f;
+    }
+    return AudioFrameProcessor::GetVoiceConfidence(data, len);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +371,7 @@ std::string KrispAdapter::ToString() const
     return "KrispAudioProcessor";
 }
 
-void KrispAdapter::SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting /*setting*/)
+void KrispAdapter::SetRuntimeSetting(webrtc::AudioProcessing::RuntimeSetting setting)
 {
 }
 
