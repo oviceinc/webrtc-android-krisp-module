@@ -40,6 +40,11 @@ typedef struct
     /// @brief Optional: Ringtone configuration that may be provided with inbound NC models to retain ringtones.
     ///        Pass NULL to skip the ringtone retention feature.
     KrispNcRingtoneCfg* ringtoneCfg;
+
+    /// @brief When true, optional low-precision inference paths (fp16, int8, int4, etc.) are enabled
+    /// for models that support promotion, when the CPU and runtime allow it. When false (default),
+    /// models run at their native precision regardless of this flag.
+    bool enableLowPrecisionExecution;
 } KrispNcSessionConfig;
 
 /// @brief Audio frame energy information struct describing noise/voice energy values

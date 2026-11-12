@@ -170,6 +170,7 @@ KrispNoiseFilter::KrispNoiseFilter() :
     m_sessionConfig.outputSampleRate = KrispSamplingRate::Sr16000Hz;
     m_sessionConfig.modelInfo = &m_modelInfo;
     m_sessionConfig.ringtoneCfg = nullptr;
+    m_sessionConfig.enableLowPrecisionExecution = false;
     m_ncCachedHandle = 0;
 }
 
