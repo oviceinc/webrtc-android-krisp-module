@@ -1,5 +1,8 @@
 #include "krisp_processor.hpp"
 
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/environment/environment_factory.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -385,13 +388,14 @@ static std::unique_ptr<NativeKrispModule> BuildModule(
 {
     auto m = std::make_unique<NativeKrispModule>();
     m->proc = proc;
-    m->apm = webrtc::AudioProcessingBuilder()
-        .SetCapturePostProcessing(std::make_unique<KrispAdapter>(m->proc))
-        .Create();
     webrtc::AudioProcessing::Config config;
     config.echo_canceller.enabled = false;
     config.echo_canceller.mobile_mode = true;
-    m->apm->ApplyConfig(config);
+    // M155: AudioProcessingBuilder was removed; the builtin builder needs an
+    // Environment, so a default one is used (same as the iOS module).
+    m->apm = webrtc::BuiltinAudioProcessingBuilder(config)
+        .SetCapturePostProcessing(std::make_unique<KrispAdapter>(m->proc))
+        .Build(webrtc::CreateEnvironment());
     return m;
 }
 

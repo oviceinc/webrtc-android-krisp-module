@@ -20,6 +20,12 @@ rtc_library("krisp_processor") {
            "../rtc_base:logging",
            "../sdk/android:native_api_jni",
            "../modules/audio_processing:audio_processing",
+           "../api:scoped_refptr",
+           "../api/audio:audio_processing",
+           "../api/audio:builtin_audio_processing_builder",
+           "../api/environment:environment_factory",
+           "../common_audio",
+           "//third_party/jni_zero",
    ]
 }
 
@@ -33,5 +39,4 @@ rtc_android_library("krisp_java") {
 generate_jni("generated_krisp_jni") {
     sources = [ "java/src/org/webrtc/KrispAudioProcessingFactory.java",]
     namespace = "Krisp"
-    jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
 }

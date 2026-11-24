@@ -94,8 +94,10 @@ void AudioFrameProcessor::ResampleAndDeliver(const float* src, size_t srcLen, in
         if (m_resampleBuffer.size() != dstLen) {
             m_resampleBuffer.resize(dstLen);
         }
-        m_resampler.InitializeIfNeeded(srcRate, kOutputSampleRate, /*num_channels=*/1);
-        m_resampler.Resample(src, srcLen, m_resampleBuffer.data(), dstLen);
+        // M155: PushResampler takes sample views and initializes itself from
+        // their sizes (10 ms of audio each).
+        m_resampler.Resample(webrtc::MonoView<const float>(src, srcLen),
+                             webrtc::MonoView<float>(m_resampleBuffer.data(), dstLen));
         convertSrc = m_resampleBuffer.data();
         convertLen = dstLen;
     }

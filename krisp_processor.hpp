@@ -4,7 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "modules/audio_processing/include/audio_processing.h"
+#include "api/audio/audio_processing.h"
+#include "api/scoped_refptr.h"
 
 #include "audio_frame_processor.hpp"
 #include "krisp-audio-sdk-nc-c.h"
@@ -72,7 +73,7 @@ private:
 
 struct NativeKrispModule {
     std::shared_ptr<AudioFrameProcessor> proc;
-    rtc::scoped_refptr<webrtc::AudioProcessing> apm;
+    webrtc::scoped_refptr<webrtc::AudioProcessing> apm;
     KrispNoiseFilter* krispFilter = nullptr;
 
     static std::unique_ptr<NativeKrispModule> Create();

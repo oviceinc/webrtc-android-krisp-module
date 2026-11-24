@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace {
 
@@ -282,3 +283,8 @@ void Module::Destroy(JNIEnv* env)
 #undef JNI_UNUSED
 
 }
+
+// M155: JNI Zero registers the generated natives of each class here.
+#if __has_include("webrtc-android-krisp-module/generated_krisp_jni/KrispAudioProcessingFactory_jni.h")
+DEFINE_JNI(KrispAudioProcessingFactory)
+#endif
