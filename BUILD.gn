@@ -5,6 +5,9 @@ import("../webrtc.gni")
 
 rtc_library("krisp_processor") {
    visibility = [ "*" ]
+   # The APM is built with a default Environment (CreateEnvironment()), which
+   # WebRTC only allows in targets that opt in.
+   allow_poison = [ "environment_construction" ]
    configs += [ "../modules/audio_processing:apm_debug_dump", ]
    configs += [ "//build/config/android:hide_all_but_jni" ]
    defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
