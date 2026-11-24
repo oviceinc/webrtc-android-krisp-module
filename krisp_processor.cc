@@ -390,7 +390,7 @@ static std::unique_ptr<NativeKrispModule> BuildModule(
     m->proc = proc;
     webrtc::AudioProcessing::Config config;
     config.echo_canceller.enabled = false;
-    config.echo_canceller.mobile_mode = true;
+    // M155 removed echo_canceller.mobile_mode; the canceller is disabled.
     // M155: AudioProcessingBuilder was removed; the builtin builder needs an
     // Environment, so a default one is used (same as the iOS module).
     m->apm = webrtc::BuiltinAudioProcessingBuilder(config)
